@@ -1,0 +1,189 @@
+<!-- livebook:{"app_settings":{"access_type":"public","output_type":"rich","slug":"openai-api-explorer"},"file_entries":[{"name":"HelloWorld.wav","type":"attachment"}],"persist_outputs":true} -->
+
+# OpenAI API Explorer
+
+```elixir
+Mix.install([
+  {:kino, "~> 0.11.1"},
+  {:req, "~> 0.4.5"},
+  {:multipart, "~> 0.4.0"}
+])
+```
+
+## API Key
+
+```elixir
+openai_api_key_input = Kino.Input.password("Paste OpenAI API Key here:")
+```
+
+## Audio - Create Speech
+
+`POST https://api.openai.com/v1/audio/speech`
+
+Generates audio from the input text
+
+https://platform.openai.com/docs/api-reference/audio/createSpeech
+
+```elixir
+audio_tts_form =
+  Kino.Control.form(
+    [
+      model: Kino.Input.select("Model", [{"tts-1", "tts-1"}, {"tts-1-hd", "tts-1-hd"}]),
+      voice:
+        Kino.Input.select("Voice", [
+          {"alloy", "alloy"},
+          {"echo", "echo"},
+          {"fable", "fable"},
+          {"onyx", "onyx"},
+          {"nova", "nova"},
+          {"shimmer", "shimmer"}
+        ]),
+      speed: Kino.Input.range("Speed", default: 1.0, min: 0.25, max: 4.0, step: 0.25),
+      input: Kino.Input.textarea("Input")
+    ],
+    submit: "Create"
+  )
+```
+
+```elixir
+# audio_tts_output_frame = Kino.Frame.new() |> Kino.render()
+
+# Kino.listen(audio_tts_form, fn %{data: data} ->
+#   openai_api_key = Kino.Input.read(openai_api_key_input)
+
+#   cond do
+#     openai_api_key == "" ->
+#       Kino.Frame.render(audio_tts_output_frame, Kino.Text.new("Please add API key"))
+
+#     String.length(data.input) < 2 ->
+#       Kino.Frame.render(audio_tts_output_frame, Kino.Text.new("Please add input"))
+
+#     true ->
+#       Req.post!(
+#         "https://api.openai.com/v1/audio/speech",
+#         headers: %{
+#           "authorization" => "Bearer #{openai_api_key}",
+#           "content-type" => "application/json"
+#         },
+#         json: %{
+#           "model" => data.model,
+#           "voice" => data.voice,
+#           "response_format" => "mp3",
+#           "speed" => data.speed,
+#           "input" => data.input
+#         }
+#       )
+#       |> Map.get(:body)
+#       |> Kino.Audio.new(:mp3, autoplay: true, loop: false)
+#       |> then(fn audio_element -> Kino.Frame.render(audio_tts_output_frame, audio_element) end)
+#   end
+# end)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+nil
+```
+
+## Audio - Create Transcription
+
+`POST https://api.openai.com/v1/audio/transcriptions`
+
+Transcribes audio into the input lanuage
+
+https://platform.openai.com/docs/api-reference/audio/createTranscription
+
+```elixir
+audio_stt_form =
+  Kino.Control.form(
+    [
+      file: Kino.Input.audio("File", format: :wav),
+      model: Kino.Input.select("Model", [{"whisper-1", "whisper-1"}]),
+      prompt: Kino.Input.text("Prompt"),
+      response_format:
+        Kino.Input.select("Response Format", [
+          {"json", "json"},
+          {"text", "text"},
+          {"verbose_json", "verbose_json"},
+          {"vtt", "vtt"}
+        ]),
+      temperature: Kino.Input.range("Temperature", default: 0, min: 0, max: 1, step: 0.1)
+    ],
+    submit: "Create"
+  )
+```
+
+```elixir
+Finch.start_link(name: OpenAIFinch)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+{:ok, #PID<0.1882.0>}
+```
+
+```elixir
+audio_stt_output_frame = Kino.Frame.new() |> Kino.render()
+
+Kino.listen(audio_stt_form, fn %{data: data} ->
+  openai_api_key = Kino.Input.read(openai_api_key_input)
+
+  file_path = data.file.file_ref |> Kino.Input.file_path()
+  file_content = file_path |> File.read!()
+
+  multipart =
+    Multipart.new()
+    |> Multipart.add_part(Multipart.Part.file_content_field(file_path, file_content, :file))
+    |> Multipart.add_part(Multipart.Part.text_field(data.model, :model))
+
+  body_binary = Multipart.body_binary(multipart)
+  content_length = Multipart.content_length(multipart)
+  content_type = Multipart.content_type(multipart, "multipart/form-data")
+
+  headers = [
+    {"Content-Type", content_type},
+    {"Content-Length", to_string(content_length)},
+    {"Authorization", "Bearer #{openai_api_key}"}
+  ]
+
+  req =
+    Finch.build("POST", "https://api.openai.com/v1/audio/transcriptions", headers, body_binary)
+
+  # res = 
+  #   Finch.build("POST", "https://api.openai.com/v1/audio/transcriptions", headers, body_binary)
+  #   |> Finch.request!(OpenAIFinch)
+  Kino.Frame.render(audio_stt_output_frame, req)
+  # cond do
+  #   openai_api_key == "" ->
+  #     Kino.Frame.render(audio_stt_output_frame, Kino.Text.new("Please add API key"))
+
+  #   data.file == nil ->
+  #     Kino.Frame.render(audio_stt_output_frame, Kino.Text.new("Please add file"))
+
+  #   true ->
+  #     Req.post!(
+  #       "https://api.openai.com/v1/audio/transcriptions",
+  #       headers: %{
+  #         "authorization" => "Bearer #{openai_api_key}",
+  #         "content-type" => "multipart/form-data",
+  #       },
+  #       form_multi: [
+  #         file: data.file.file_ref |> Kino.Input.file_path() |> File.read!(),
+  #         model: data.model
+  #       ]
+  #     )
+  #     |> Map.get(:body)
+  #     |> then(fn body -> Kino.Frame.render(audio_stt_output_frame, body) end)
+  # end
+end)
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#PID<0.2066.0>
+```
+
+<!-- livebook:{"offset":5095,"stamp":{"token":"XCP.pCb_KV3tiwxiLkgi582QHOpIQROaVicMtmj-she-8NI-d24nRBvbpiGAoQyD3jUSLTgDsCfBQGIKF6BCOsLau3D3GhT3w1j7GfLZtbl2xIjp2BqwOSPn8r8","version":2}} -->
